@@ -129,26 +129,53 @@ function mountPricingFeed(
 ): void {
   let snapshot: OfficialPricing | null = null
   let fetchedAt = 0
+  let stopped = false
+  let inFlight: Promise<void> | undefined
+  let activeController: AbortController | undefined
 
-  const refresh = async (): Promise<void> => {
-    try {
-      const response = await fetch(pricingUrl, { signal: AbortSignal.timeout(requestTimeoutMs) })
-      if (!response.ok) return
-      const parsed = parseOfficialPricing(await response.text())
-      if (parsed !== null) {
-        snapshot = parsed
-        fetchedAt = Date.now()
+  const refresh = (): Promise<void> => {
+    if (stopped) return Promise.resolve()
+    if (inFlight !== undefined) return inFlight
+
+    const controller = new AbortController()
+    activeController = controller
+    const timeout = setTimeout(() => { controller.abort() }, requestTimeoutMs)
+    timeout.unref()
+    const operation = (async () => {
+      try {
+        const response = await fetch(pricingUrl, { signal: controller.signal })
+        if (!response.ok) return
+        const parsed = parseOfficialPricing(await response.text())
+        if (parsed !== null && !stopped) {
+          snapshot = parsed
+          fetchedAt = Date.now()
+        }
+      } catch {
+        // Network failure, timeout, teardown, or page-shape drift: keep the last good snapshot.
       }
-    } catch {
-      // Network failure or page-shape drift: keep the last good snapshot.
-    }
+    })()
+    inFlight = operation.finally(() => {
+      clearTimeout(timeout)
+      if (activeController === controller) activeController = undefined
+      inFlight = undefined
+    })
+    return inFlight
   }
 
   ctx.effect(() => {
-    void refresh()
+    // Starting the request inside the loader's activation stack makes its
+    // timeout elapse while the Web surface is still doing synchronous boot
+    // work. Defer once so the request budget starts after that stack yields.
+    const initial = setTimeout(() => { void refresh() }, 0)
+    initial.unref()
     const timer = setInterval(() => { void refresh() }, refreshIntervalMs)
     timer.unref()
-    return () => { clearInterval(timer) }
+    return () => {
+      stopped = true
+      clearTimeout(initial)
+      clearInterval(timer)
+      activeController?.abort()
+    }
   }, 'cost-meter: official pricing refresh')
 
   ctx.effect(() => webServer.register({

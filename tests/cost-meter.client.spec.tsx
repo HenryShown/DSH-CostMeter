@@ -10,7 +10,7 @@
  * the trigger; a capability drop closes the open panel.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
@@ -79,6 +79,31 @@ const value = (totalCost: number): UsageCostProjection => ({
     { model: 'deepseek-v4-flash', cost: 0.000017, inputCacheHitTokens: 0, inputCacheMissTokens: 3, outputTokens: 7 },
   ],
   schedule,
+})
+
+const officialResponse = (
+  peak: Record<string, { inputCacheHit: number; inputCacheMiss: number; output: number }> = {
+    'deepseek-v4-flash': { inputCacheHit: 0.1, inputCacheMiss: 3, output: 9 },
+    'deepseek-v4-pro': { inputCacheHit: 0.3, inputCacheMiss: 9, output: 27 },
+  },
+) => ({
+  ok: true as const,
+  fetchedAt: new Date(2026, 7, 15, 12, 34).getTime(),
+  prices: {
+    before: {
+      'deepseek-v4-flash': { inputCacheHit: 0.02, inputCacheMiss: 1, output: 2 },
+      'deepseek-v4-pro': { inputCacheHit: 0.025, inputCacheMiss: 3, output: 6 },
+    },
+    peak,
+    offPeak: {
+      'deepseek-v4-flash': { inputCacheHit: 0.05, inputCacheMiss: 1.5, output: 4.5 },
+      'deepseek-v4-pro': { inputCacheHit: 0.15, inputCacheMiss: 4.5, output: 13.5 },
+    },
+    peakRanges: schedule.peakRanges,
+    timezone: 'Asia/Shanghai',
+    effectiveFrom: '2026-08-17T00:00:00+08:00',
+    effectiveFromMs: 1786896000000,
+  },
 })
 
 const trigger = () => screen.getByRole('button', { name: '费用 ¥0.7031' })
@@ -181,26 +206,10 @@ describe('CostMeter', () => {
   it('prefers the official snapshot from the price route and annotates the sync time', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-20T01:30:00Z'))
-    const fetchedAt = new Date(2026, 7, 15, 12, 34).getTime()
-    const official = {
-      ok: true as const,
-      fetchedAt,
-      prices: {
-        // The official peak tier covers flash only: the pro row falls back
-        // to the configured schedule's peak tier.
-        peak: {
-          'deepseek-v4-flash': { inputCacheHit: 9.99, inputCacheMiss: 8.88, output: 7.77 },
-        },
-        offPeak: {
-          'deepseek-v4-flash': { inputCacheHit: 0.05, inputCacheMiss: 1.5, output: 4.5 },
-          'deepseek-v4-pro': { inputCacheHit: 0.15, inputCacheMiss: 4.5, output: 13.5 },
-        },
-        peakRanges: [[540, 720], [840, 1080]] as [number, number][],
-        timezone: 'Asia/Shanghai',
-        effectiveFrom: '2026-08-17T00:00:00+08:00',
-        effectiveFromMs: 1786896000000,
-      },
-    }
+    const official = officialResponse({
+      'deepseek-v4-flash': { inputCacheHit: 9.99, inputCacheMiss: 8.88, output: 7.77 },
+      'deepseek-v4-pro': { inputCacheHit: 6.66, inputCacheMiss: 5.55, output: 4.44 },
+    })
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify(official), { status: 200, headers: { 'content-type': 'application/json' } })))
     setup(value(0.703052))
@@ -211,8 +220,69 @@ describe('CostMeter', () => {
     expect(screen.getAllByText('¥9.99')).toHaveLength(1)
     expect(screen.getAllByText('¥8.88')).toHaveLength(1)
     expect(screen.getAllByText('¥7.77')).toHaveLength(1)
-    // The pro row fell back to the configured peak tier.
+    expect(screen.getAllByText('¥6.66')).toHaveLength(1)
+  })
+
+  it('falls back atomically when the official tier omits a displayed model', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-20T01:30:00Z'))
+    const official = officialResponse({
+      'deepseek-v4-flash': { inputCacheHit: 9.99, inputCacheMiss: 8.88, output: 7.77 },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify(official), { status: 200, headers: { 'content-type': 'application/json' } })))
+    setup(value(0.703052))
+    fireEvent.click(trigger())
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.queryByText(/官方同步/)).toBeNull()
+    expect(screen.getAllByText('¥0.1')).toHaveLength(1)
     expect(screen.getAllByText('¥0.3')).toHaveLength(1)
+    expect(screen.queryByText('¥9.99')).toBeNull()
+  })
+
+  it('does not label official CNY prices as a configured foreign currency', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-20T01:30:00Z'))
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify(officialResponse({
+        'deepseek-v4-flash': { inputCacheHit: 9.99, inputCacheMiss: 8.88, output: 7.77 },
+        'deepseek-v4-pro': { inputCacheHit: 6.66, inputCacheMiss: 5.55, output: 4.44 },
+      })), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const usd = value(0.703052)
+    setup({ ...usd, currency: 'USD', schedule: { ...usd.schedule, currency: 'USD' } })
+    fireEvent.click(screen.getByRole('button', { name: '费用 $0.7031' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.queryByText(/官方同步/)).toBeNull()
+    expect(screen.getAllByText('$0.1')).toHaveLength(1)
+    expect(screen.queryByText('$9.99')).toBeNull()
+  })
+
+  it('aborts a closed-panel request and ignores its late result after reopening', async () => {
+    const pending: { resolve: (response: Response) => void; signal: AbortSignal }[] = []
+    vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((resolve) => {
+        pending.push({ resolve, signal: init!.signal as AbortSignal })
+      })))
+    setup(value(0.703052))
+    fireEvent.click(trigger())
+    expect(pending).toHaveLength(1)
+    fireEvent.click(trigger())
+    expect(pending[0]!.signal.aborted).toBe(true)
+    fireEvent.click(trigger())
+    expect(pending).toHaveLength(2)
+
+    await act(async () => {
+      pending[1]!.resolve(new Response(JSON.stringify(officialResponse()), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+    })
+    await waitFor(() => { expect(screen.getByText('官方同步 12:34')).toBeTruthy() })
+
+    await act(async () => {
+      pending[0]!.resolve(new Response(null, { status: 404 }))
+    })
+    expect(screen.getByText('官方同步 12:34')).toBeTruthy()
   })
 
   it('falls back to the local schedule when the price route read fails', async () => {

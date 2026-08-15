@@ -26,7 +26,11 @@ interface Route {
   handler: (req: { method?: string }, res: { writeHead: (status: number, headers?: object) => void; end: (body?: string) => void }) => void
 }
 
-async function bench(fetchImpl: () => Promise<Response>, hasWebServer = true) {
+async function bench(
+  fetchImpl: typeof fetch,
+  hasWebServer = true,
+  feedConfig: { refreshIntervalMs?: number; requestTimeoutMs?: number } = {},
+) {
   vi.stubGlobal('fetch', fetchImpl)
   const ctx = new Context()
   const projections = { register: vi.fn() }
@@ -44,6 +48,7 @@ async function bench(fetchImpl: () => Promise<Response>, hasWebServer = true) {
   const fiber = ctx.plugin({ name: 'cost-meter', inject: [...inject], Config, apply }, {
     refreshIntervalMs: 60_000,
     requestTimeoutMs: 5_000,
+    ...feedConfig,
   } as never)
   await fiber.await()
   const call = (method = 'GET'): { body: string; status: number } => {
@@ -64,6 +69,7 @@ describe('dsh-cost-meter official pricing feed', () => {
     expect(Config).toBeDefined()
     const b = await bench(async () => { throw new Error('offline') })
     expect(b.projections.register).toHaveBeenCalledTimes(1)
+    await b.fiber.dispose()
   })
 
   it('fetches once at activation and serves the parsed snapshot', async () => {
@@ -82,6 +88,57 @@ describe('dsh-cost-meter official pricing feed', () => {
       expect(payload.fetchedAt).toBeGreaterThan(0)
     })
     expect(b.route().path).toBe(PRICES_ENDPOINT)
+    await b.fiber.dispose()
+  })
+
+  it('cancels the deferred activation refresh when torn down first', async () => {
+    vi.useFakeTimers()
+    const fetchImpl = vi.fn(async () => new Response(fixture(), { status: 200 }))
+    const b = await bench(fetchImpl)
+    expect(fetchImpl).not.toHaveBeenCalled()
+    await b.fiber.dispose()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('keeps refreshes single-flight and ignores a late result after teardown', async () => {
+    vi.useFakeTimers()
+    let requestSignal: AbortSignal | undefined
+    let resolveFetch: ((response: Response) => void) | undefined
+    const fetchImpl = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      requestSignal = init?.signal as AbortSignal
+      return new Promise<Response>((resolve) => { resolveFetch = resolve })
+    })
+    const b = await bench(fetchImpl, true, { refreshIntervalMs: 10, requestTimeoutMs: 1_000 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(30)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+
+    await b.fiber.dispose()
+    expect(requestSignal?.aborted).toBe(true)
+    resolveFetch!(new Response(fixture(), { status: 200 }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(b.call().status).toBe(404)
+  })
+
+  it('aborts an in-flight refresh at the request timeout', async () => {
+    vi.useFakeTimers()
+    let requestSignal: AbortSignal | undefined
+    const fetchImpl = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      requestSignal = init?.signal as AbortSignal
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal!.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        })
+      })
+    })
+    const b = await bench(fetchImpl, true, { requestTimeoutMs: 50 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(requestSignal?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(requestSignal?.aborted).toBe(true)
+    await b.fiber.dispose()
   })
 
   it('serves an explicit miss before any successful fetch', async () => {
@@ -91,6 +148,7 @@ describe('dsh-cost-meter official pricing feed', () => {
       expect(status).toBe(404)
       expect(JSON.parse(body)).toEqual({ ok: false })
     })
+    await b.fiber.dispose()
   })
 
   it('keeps the last good snapshot when a later refresh fails', async () => {
@@ -105,6 +163,7 @@ describe('dsh-cost-meter official pricing feed', () => {
     const { status, body } = b.call()
     expect(status).toBe(200)
     expect(JSON.parse(body).ok).toBe(true)
+    await b.fiber.dispose()
   })
 
   it('rejects non-GET requests and disposes the route on teardown', async () => {
@@ -121,6 +180,7 @@ describe('dsh-cost-meter official pricing feed', () => {
     await vi.waitFor(() => { expect(b.projections.register).toHaveBeenCalledTimes(1) })
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(b.hasRoute()).toBe(false)
+    await b.fiber.dispose()
   })
 
   it('mounts the feed when the web server registers after activation', async () => {
@@ -142,5 +202,6 @@ describe('dsh-cost-meter official pricing feed', () => {
     })
     await vi.waitFor(() => { expect(route).toBeDefined() })
     expect(route!.path).toBe(PRICES_ENDPOINT)
+    await fiber.dispose()
   })
 })
