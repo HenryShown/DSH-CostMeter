@@ -1,6 +1,6 @@
 /**
- * Package-owned invariant companion for `@deepseek-ai/dsh-cost-meter`.
- * @module @deepseek-ai/dsh-cost-meter/invariant
+ * Package-owned invariant companion for `dsh-cost-meter`.
+ * @module dsh-cost-meter/invariant
  */
 import type { Context } from '@deepseek-ai/cordis';
 /** Cordis companion plugin name. */
@@ -13,4 +13,3 @@ export declare const inject: string[];
  * @returns the installed registration's disposer after setup succeeds.
  */
 export declare const apply: (ctx: Context) => Promise<() => void>;
-//# sourceMappingURL=invariant.d.ts.map

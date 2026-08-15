@@ -4,7 +4,7 @@
  * current-price display computes its own tier over the parsed schedule
  * snapshot in the display package; it never re-resolves a schedule here.
  *
- * @module @deepseek-ai/dsh-cost-meter/pricing
+ * @module dsh-cost-meter/pricing
  */
 import type { ModelPricingConfig, PricePeriod, PricingScheduleConfig, ResolvedUnitPrice, UnitPrice, UsageCostBucketTokens } from './types.ts';
 /** Currency denominator: every configured rate is per one million tokens. */
@@ -49,4 +49,3 @@ export declare function resolveUnitPrice(schedule: ResolvedPricingSchedule, mode
  * @returns the cost in the schedule's currency.
  */
 export declare function costOfUsage(buckets: UsageCostBucketTokens, price: UnitPrice): number;
-//# sourceMappingURL=pricing.d.ts.map

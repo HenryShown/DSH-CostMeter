@@ -10,7 +10,7 @@
  * lands, so a mid-step model switch moves the step's usage to the new
  * model instead of double counting it.
  *
- * @module @deepseek-ai/dsh-cost-meter/projection
+ * @module dsh-cost-meter/projection
  */
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection';
 import { type ResolvedPricingSchedule } from './pricing.ts';
@@ -44,4 +44,3 @@ interface CostState {
  */
 export declare function usageCostProjectionDefinition(schedule: ResolvedPricingSchedule, raw: PricingScheduleConfig): ProjectionDefinition<'usageCost', CostState>;
 export {};
-//# sourceMappingURL=projection.d.ts.map

@@ -5,7 +5,7 @@
  * projections serve it: `./client` for client aggregates, `./src/*` for
  * host consumers and tests, with zero content duplication.
  *
- * @module @deepseek-ai/dsh-cost-meter/types
+ * @module dsh-cost-meter/types
  */
 export {};
 /** Currency price of one bucket, in {@link PricingScheduleConfig.currency} per one million tokens. */
@@ -34,8 +34,17 @@ export interface PricingScheduleConfig {
     peakPeriods: readonly string[];
     models: Record<string, ModelPricingConfig>;
 }
+/** The official-price feed half of the plugin configuration; every field defaults. */
+export interface PricingFeedConfig {
+    /** The official pricing page URL the host half scrapes. */
+    pricingUrl?: string;
+    /** Refresh interval in milliseconds. */
+    refreshIntervalMs?: number;
+    /** Per-request timeout in milliseconds. */
+    requestTimeoutMs?: number;
+}
 /** The cost-meter plugin configuration; every field defaults to the shipped DeepSeek V4 schedule. */
-export type CostMeterConfig = PricingScheduleConfig;
+export type CostMeterConfig = PricingScheduleConfig & PricingFeedConfig;
 /** Which rate tier applies to one instant. */
 export type PricePeriod = 'before' | 'peak' | 'offPeak';
 /** The tier and its unit price resolved for one model at one instant. */
@@ -89,4 +98,3 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
         usageCost: UsageCostProjection;
     }
 }
-//# sourceMappingURL=types.d.ts.map

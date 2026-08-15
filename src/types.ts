@@ -41,8 +41,18 @@ export interface PricingScheduleConfig {
   models: Record<string, ModelPricingConfig>
 }
 
+/** The official-price feed half of the plugin configuration; every field defaults. */
+export interface PricingFeedConfig {
+  /** The official pricing page URL the host half scrapes. */
+  pricingUrl?: string
+  /** Refresh interval in milliseconds. */
+  refreshIntervalMs?: number
+  /** Per-request timeout in milliseconds. */
+  requestTimeoutMs?: number
+}
+
 /** The cost-meter plugin configuration; every field defaults to the shipped DeepSeek V4 schedule. */
-export type CostMeterConfig = PricingScheduleConfig
+export type CostMeterConfig = PricingScheduleConfig & PricingFeedConfig
 
 /** Which rate tier applies to one instant. */
 export type PricePeriod = 'before' | 'peak' | 'offPeak'

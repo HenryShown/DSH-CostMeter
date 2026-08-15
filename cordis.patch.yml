@@ -1,7 +1,12 @@
 # Loader patch contributed by this package as a dsh plugin bundle:
 # `dsh plugin --profile <name> add github:HenryShown/DSH-CostMeter` installs
 # the package and mounts this row into the profile composition.
+# The row is an insert (the bundle patches over an empty root entry list);
+# it carries both halves of the plugin: the host half folds the `usageCost`
+# projection and serves the official-price snapshot, the browser half renders
+# the composer cost pill (see `dsh.client` in package.json).
 # The session-projection registry row ships with dsh-base; a composition
 # without it must add `@deepseek-ai/dsh-session-projection` explicitly.
-- id: cost-meter
-  name: 'dsh-cost-meter'
+- insert:
+    - id: cost-meter
+      name: 'dsh-cost-meter'
