@@ -8,9 +8,9 @@
  */
 import type { OfficialPricing } from './prices.ts';
 /**
- * Parse the page. Peak and off-peak buckets for every shipped model plus
- * the peak intervals are required; the flat tier and the cutover sentence
- * are best-effort (the page drops them over time).
+ * Parse the page. Peak and off-peak buckets for every shipped model, the
+ * peak intervals, and the cutover sentence are required. Only the flat tier
+ * is optional because the page can drop it after the cutover.
  * @param html - the fetched page body.
  * @returns the snapshot, or null when the required parts do not resolve.
  */

@@ -55,10 +55,11 @@ half.
 
 - The session-projection registry ships with `dsh-base`; compositions
   without it need `@deepseek-ai/dsh-session-projection`.
-- The browser half defaults to the `conversation.input.dock` seat (every
-  Web surface has it). `config.seat: meter` targets
-  `conversation.input.meter`, declared only by newer ui-conversation
-  builds; on older builds that contribution never renders.
+- The browser half defaults to `conversation.input.meter`, immediately right
+  of the context ring. Direct browser-face integrations may pass
+  `{ seat: 'dock' }` for the portable list seat on older surfaces. Harness
+  Web boot does not forward host-row config to client bundles, so `seat` is
+  not a supported host YAML key.
 - The official-price feed requires the `webServer` service (Web surface);
   headless surfaces keep the projection only.
 - Outbound HTTPS to `api-docs.deepseek.com` is required for the official
@@ -67,11 +68,11 @@ half.
 ## Development inside a harness checkout
 
 ```bash
-# Place this repository at packages/community/dsh-cost-meter, then:
+# Place this repository at plugins/dsh-cost-meter and include plugins/* in
+# the checkout's pnpm-workspace.yaml, then run from the checkout root:
 pnpm install
-pnpm exec vitest run packages/community/dsh-cost-meter          # tests (run from the checkout root)
-pnpm --filter dsh-cost-meter exec tsc -p tsconfig.build.json    # type declarations
-pnpm --filter dsh-cost-meter exec tsdown                        # lib/ bundles
+pnpm --filter dsh-cost-meter run test
+pnpm --filter dsh-cost-meter run build
 ```
 
 `pnpm exec tsc -p tsconfig.json` typechecks sources and tests. After any

@@ -1,9 +1,9 @@
 /**
  * dsh-cost-meter browser half on a real SlotRegistry: the plugin occupies
- * the conversation-declared `conversation.input.dock` list seat by default
- * (the portable choice every Web surface ships) and the newer
- * `conversation.input.meter` single seat when configured; an unknown seat
- * fails loud; teardown empties the seat (HMR safety).
+ * the conversation-declared `conversation.input.meter` single seat by
+ * default and the portable `conversation.input.dock` list seat when
+ * configured; an unknown seat fails loud; teardown empties the seat (HMR
+ * safety).
  */
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
@@ -19,7 +19,7 @@ describe('dsh-cost-meter browser apply', () => {
   })
 
   it('resolves the seat config and rejects unknown values', () => {
-    expect(resolveSeat({})).toBe('dock')
+    expect(resolveSeat({})).toBe('meter')
     expect(resolveSeat({ seat: 'dock' })).toBe('dock')
     expect(resolveSeat({ seat: 'meter' })).toBe('meter')
     expect(() => resolveSeat({ seat: 'nowhere' } as never)).toThrow(/unknown seat/)
@@ -35,8 +35,25 @@ describe('dsh-cost-meter browser apply', () => {
     return { ctx, slots, fiber }
   }
 
-  it('waits for the dock declaration, registers, and unregisters on teardown', async () => {
+  it('waits for the meter declaration by default, registers, and unregisters on teardown', async () => {
     const b = await bench()
+    expect(b.slots.entries('conversation.input.meter')).toHaveLength(0)
+    b.slots.register({
+      name: 'root',
+      children: { 'conversation.input.meter': { kind: 'single', scope: 'session' } },
+    } as never, () => null)
+    await Promise.resolve()
+    const entries = b.slots.entries('conversation.input.meter')
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.component).toBe(CostMeter)
+    expect(entries[0]!.locale).toBe('cost')
+
+    await b.fiber.dispose()
+    expect(b.slots.entries('conversation.input.meter')).toHaveLength(0)
+  })
+
+  it('occupies the dock seat when configured for compatibility', async () => {
+    const b = await bench({ seat: 'dock' })
     expect(b.slots.entries('conversation.input.dock')).toHaveLength(0)
     b.slots.register({
       name: 'root',
@@ -47,21 +64,5 @@ describe('dsh-cost-meter browser apply', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0]!.component).toBe(CostMeter)
     expect(entries[0]!.locale).toBe('cost')
-
-    await b.fiber.dispose()
-    expect(b.slots.entries('conversation.input.dock')).toHaveLength(0)
-  })
-
-  it('occupies the meter seat when configured', async () => {
-    const b = await bench({ seat: 'meter' })
-    expect(b.slots.entries('conversation.input.meter')).toHaveLength(0)
-    b.slots.register({
-      name: 'root',
-      children: { 'conversation.input.meter': { kind: 'single', scope: 'session' } },
-    } as never, () => null)
-    await Promise.resolve()
-    const entries = b.slots.entries('conversation.input.meter')
-    expect(entries).toHaveLength(1)
-    expect(entries[0]!.component).toBe(CostMeter)
   })
 })

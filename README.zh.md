@@ -7,7 +7,7 @@ DeepSeek Harness 插件：把已记录的 provider 用量折叠成每个会话�
 一个包、两个半边：
 
 - **宿主半边** —— 注册 `usageCost` 会话投影单元，并在 `/plugins/dsh-cost-meter/prices.json` 服务官方价格快照（没有 Web 服务器的界面只保留投影）。
-- **浏览器半边**（`./client`）—— 渲染 composer 药丸与面板；座位可配置（默认 `dock`，新版 harness 可用 `meter`）。
+- **浏览器半边**（`./client`）—— 渲染 composer 药丸与面板；默认使用 `meter` 座位，紧邻上下文占用环右侧。
 
 ## 安装
 
@@ -31,7 +31,7 @@ curl -s http://127.0.0.1:3090/plugins/dsh-cost-meter/prices.json
 - **药丸**：会话合计（`¥2.9909`），经 `usageCost` 投影实时更新；悬停显示 `费用 ¥2.9909`。
 - **面板**：突出显示的会话合计；分模型费用与 token 明细（`输入 · 缓存命中 72.1M`）；`实时费率/1M tokens` 费率表（`模型 / 缓存命中 / 未命中 / 输出` 列，显示当前生效档位）；切换提醒（`◷ 8 月 17 日起启用峰谷计价`），生效前标注 `即将生效`。
 - **实时档位**：展示档位按客户端时钟对照切换时间与峰谷区间解析，面板打开期间每 30 秒重算。
-- **官方同步**：宿主半边有快照时，费率表与切换时间取自官方定价页并标注 `官方同步 HH:MM`；抓取/解析失败时静默回退本地配置。
+- **官方同步**：宿主半边有完整快照，且其币种与档期事实和投影一致时，费率表取自官方定价页并标注 `官方同步 HH:MM`；抓取、解析或兼容性检查失败时静默回退本地配置。
 
 ## 配置
 
@@ -62,17 +62,12 @@ curl -s http://127.0.0.1:3090/plugins/dsh-cost-meter/prices.json
         offPeak: { inputCacheHit: 0.15, inputCacheMiss: 4.50, output: 13.50 }
 ```
 
-浏览器半边通过自身的 `config.seat` 选择 composer 座位：
-
-```yaml
-- id: cost-meter
-  name: 'dsh-cost-meter'
-  config:
-    seat: dock   # 默认；也可填 meter
-```
-
-- `dock` —— composer 上方的列表条（`conversation.input.dock`）。所有 Web 界面都有；这是可移植的默认值。
-- `meter` —— 上下文占用环右侧的命名座位（`conversation.input.meter`），仅较新的 ui-conversation 构建声明。旧构建上该贡献不会渲染。
+安装后的浏览器 bundle 默认使用 `meter`，即上下文占用环右侧的命名座位
+（`conversation.input.meter`）。当前 Harness Web 启动只按包名组合客户端
+bundle，不会把宿主插件行的 config 转发给浏览器，因此上面的宿主 YAML
+不支持 `seat` 键。直接组合浏览器半边的集成方仍可传入
+`{ seat: 'dock' }`，在旧界面上改用 composer 上方的可移植列表条
+（`conversation.input.dock`）。
 
 ## 计价规则
 
@@ -84,17 +79,16 @@ curl -s http://127.0.0.1:3090/plugins/dsh-cost-meter/prices.json
 
 ## 官方实时费率
 
-DeepSeek 没有结构化价格接口，宿主半边抓取官方定价文档页（Docusaurus HTML）并严格解析：两个内置模型的全部峰/谷桶都必须解析成功，否则整体放弃——显示错误价格比回退本地配置更糟。抓取或解析失败保留上一次成功快照；没有快照时路由以 HTTP 404 应答 `{ "ok": false }`。抓取每小时一次，空闲时定时器已 unref，不做任何请求。
+DeepSeek 没有结构化价格接口，宿主半边抓取官方定价文档页（Docusaurus HTML）并严格解析：两个内置模型的全部峰/谷桶都必须解析成功，否则整体放弃——显示错误价格比回退本地配置更糟。抓取或解析失败保留上一次成功快照；没有快照时路由以 HTTP 404 应答 `{ "ok": false }`。面板只接受 CNY，且时区、切换时间、峰段与宿主投影一致并覆盖全部展示模型的快照，避免把官方人民币数值或档期事实混入自定义部署配置。Web 进程运行期间每小时抓取一次；定时器已 unref，因此不会仅为刷新价格而阻止进程退出。
 
 ## 开发
 
-peer 包（`@deepseek-ai/*`）由 DeepSeek Harness 安装提供，不在 npm registry 上。把本仓库放到 checkout 的 workspace 下（`packages/community/dsh-cost-meter`）让 workspace 链接解析 peer，然后：
+peer 包（`@deepseek-ai/*`）由 DeepSeek Harness 安装提供，不在 npm registry 上。把本仓库放到 checkout 的本地插件 workspace（`plugins/dsh-cost-meter`），并在 checkout 的 `pnpm-workspace.yaml` 中包含 `plugins/*`，然后从 checkout 根目录运行：
 
 ```bash
 pnpm install
-pnpm exec vitest run packages/community/dsh-cost-meter   # 在 checkout 根目录执行
-pnpm --filter dsh-cost-meter exec tsc -p tsconfig.build.json
-pnpm --filter dsh-cost-meter exec tsdown
+pnpm --filter dsh-cost-meter run test
+pnpm --filter dsh-cost-meter run build
 ```
 
 提交的 `lib/` 即为安装物——使用者无需构建。bundle 自包含：浏览器半边自行注入样式表（不依赖 CSS 管线），仅把 harness 平台模块外置。

@@ -16,7 +16,7 @@ One package, both halves:
   serves the official-price snapshot on `/plugins/dsh-cost-meter/prices.json`
   (surfaces without a web server keep the projection only).
 - **Browser half** (`./client`) — renders the composer pill and panel; the
-  seat is configurable (`dock` by default, `meter` on newer harnesses).
+  default `meter` seat places it immediately right of the context ring.
 
 ## Installation
 
@@ -53,9 +53,10 @@ curl -s http://127.0.0.1:3090/plugins/dsh-cost-meter/prices.json
 - **Live tier**: the displayed tier resolves on the client clock against
   the schedule's cutover and peak ranges and re-resolves every 30 seconds
   while the panel is open.
-- **Official sync**: when the host half has a snapshot, the table and the
-  cutover facts come from the official pricing page and the panel shows
-  `官方同步 HH:MM`; any fetch/parse failure falls back to the local
+- **Official sync**: when the host half has a complete snapshot whose
+  currency and schedule facts match the projection, the rate table comes
+  from the official pricing page and the panel shows `官方同步 HH:MM`;
+  any fetch, parse, or compatibility failure falls back to the local
   configuration silently.
 
 ## Configuration
@@ -92,20 +93,13 @@ entries for the other models. `pricingUrl`, `refreshIntervalMs`, and
         offPeak: { inputCacheHit: 0.15, inputCacheMiss: 4.50, output: 13.50 }
 ```
 
-The browser half selects its composer seat through its own `config.seat`:
-
-```yaml
-- id: cost-meter
-  name: 'dsh-cost-meter'
-  config:
-    seat: dock   # default; also accepts: meter
-```
-
-- `dock` — the list strip above the composer (`conversation.input.dock`).
-  Every Web surface ships it; this is the portable default.
-- `meter` — the named seat immediately right of the context-occupancy ring
-  (`conversation.input.meter`), which only newer ui-conversation builds
-  declare. On older builds the contribution simply never renders.
+The installed browser bundle uses `meter`, the named seat immediately right
+of the context-occupancy ring (`conversation.input.meter`). Current Harness
+Web boot composes client bundles by package name and does not forward the
+host row's config into the browser, so `seat` is not a supported key in the
+host YAML above. Integrators that compose the browser face directly may pass
+`{ seat: 'dock' }` to use the portable list strip above the composer
+(`conversation.input.dock`) on older surfaces.
 
 ## Pricing rules
 
@@ -137,21 +131,25 @@ peak/off-peak bucket for both shipped models must resolve or the whole
 parse fails — a wrong price is worse than falling back to the local
 configuration. A failed fetch or parse keeps the last good snapshot; the
 route answers `{ "ok": false }` with HTTP 404 while no snapshot exists.
-The feed refreshes hourly and re-fetches nothing while idle (the interval
-timer is unref'd).
+The panel accepts a snapshot only when it is CNY, its timezone, cutover, and
+peak intervals match the host projection, and it prices every displayed
+model; this prevents official CNY values or schedule facts from being mixed
+with a custom deployment configuration.
+The feed refreshes hourly while the Web process is running. Its interval
+timer is unref'd, so the feed alone does not keep the process alive.
 
 ## Development
 
 The peer packages (`@deepseek-ai/*`) are provided by a DeepSeek Harness
-installation, not by the npm registry. Place this repository under the
-checkout's workspace (`packages/community/dsh-cost-meter`) so the
-workspace link resolves the peers, then:
+installation, not by the npm registry. Place this repository in the
+checkout's local plugin workspace (`plugins/dsh-cost-meter`) and include
+`plugins/*` in that checkout's `pnpm-workspace.yaml`, then run from the
+checkout root:
 
 ```bash
 pnpm install
-pnpm exec vitest run packages/community/dsh-cost-meter   # from the checkout root
-pnpm --filter dsh-cost-meter exec tsc -p tsconfig.build.json
-pnpm --filter dsh-cost-meter exec tsdown
+pnpm --filter dsh-cost-meter run test
+pnpm --filter dsh-cost-meter run build
 ```
 
 The committed `lib/` is what installs — consumers never build. The bundle

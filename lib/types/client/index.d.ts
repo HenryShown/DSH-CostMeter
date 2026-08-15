@@ -8,11 +8,10 @@
  * session-projection seam already serves.
  *
  * The plugin occupies one of two composer seats, selected by config:
- * `dock` (default) registers into `conversation.input.dock`, the list strip
- * above the composer that every Web surface ships; `meter` registers into
- * the named `conversation.input.meter` seat right of the context-occupancy
- * ring, which only newer ui-conversation builds declare. Both render the
- * same pill and panel.
+ * `meter` (default) registers into the named `conversation.input.meter` seat
+ * right of the context-occupancy ring; `dock` is the compatibility fallback
+ * for older Web surfaces and registers into the list strip above the
+ * composer. Both render the same pill and panel.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
 import { type CostKey } from './locales.ts';
@@ -28,11 +27,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
 }
 /**
- * The client plugin config: which composer seat the pill occupies. `dock`
- * is the portable default; `meter` targets the newer context-ring seat.
+ * The client plugin config: which composer seat the pill occupies. `meter`
+ * is the product default; `dock` remains an explicit compatibility fallback.
  */
 export interface Config {
-    /** The composer seat to register into; `dock` when omitted. */
+    /** The composer seat to register into; `meter` when omitted. */
     seat?: 'dock' | 'meter';
 }
 /** Required services: the seat's slot registry and the locale registry. */

@@ -14,11 +14,17 @@ import { useEffect, useRef, useState } from 'react'
 import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import { PRICES_ENDPOINT, type OfficialPricing, type OfficialPricingResponse } from '../prices.ts'
+import {
+  PRICES_ENDPOINT,
+  type OfficialModelPrice,
+  type OfficialPricing,
+  type OfficialPricingResponse,
+  type OfficialTierPrices,
+} from '../prices.ts'
 import type { UsageCostProjection } from '../types.ts'
 import {
   currencySymbol, formatClockMs, formatCost, formatModelName, formatModelShortName, formatPrice, formatTokens,
-  parseEffectiveFrom, resolveTier,
+  parseEffectiveFrom, resolveTier, type CostTier,
 } from './format.ts'
 import { injectStyles, styles as css } from './styles.ts'
 
@@ -42,6 +48,45 @@ type PriceBucket = 'inputCacheHit' | 'inputCacheMiss' | 'output'
 interface OfficialSnapshot {
   fetchedAt: number
   prices: OfficialPricing
+}
+
+/** The official DeepSeek pricing page publishes rates in CNY. */
+const OFFICIAL_CURRENCY = 'CNY'
+
+const sameRanges = (
+  left: readonly (readonly [number, number])[],
+  right: readonly (readonly [number, number])[],
+): boolean => left.length === right.length && left.every(
+  (range, index) => range[0] === right[index]?.[0] && range[1] === right[index]?.[1],
+)
+
+const completePrice = (price: OfficialModelPrice | undefined): price is OfficialModelPrice =>
+  price !== undefined
+  && Number.isFinite(price.inputCacheHit) && price.inputCacheHit >= 0
+  && Number.isFinite(price.inputCacheMiss) && price.inputCacheMiss >= 0
+  && Number.isFinite(price.output) && price.output >= 0
+
+/**
+ * Accept an official tier only when it uses the same currency and schedule
+ * facts as the host projection and prices every displayed model.
+ */
+function compatibleOfficialTier(
+  cost: UsageCostProjection,
+  official: OfficialSnapshot | null,
+  tier: CostTier,
+): OfficialTierPrices | undefined {
+  if (
+    official === null
+    || cost.currency !== OFFICIAL_CURRENCY
+    || official.prices.timezone !== cost.schedule.timezone
+    || official.prices.effectiveFromMs !== cost.schedule.effectiveFromMs
+    || !sameRanges(official.prices.peakRanges, cost.schedule.peakRanges)
+  ) return undefined
+  const prices = official.prices[tier]
+  if (prices === undefined) return undefined
+  return Object.keys(cost.schedule.models).every(model => completePrice(prices[model]))
+    ? prices
+    : undefined
 }
 
 /**
@@ -78,15 +123,23 @@ export function CostMeter({ useProjection, t, locked = false }: CostMeterViewPro
   useEffect(() => {
     if (!open || !available) return
     const controller = new AbortController()
+    let active = true
     void fetch(PRICES_ENDPOINT, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) return null
         const body = await response.json() as OfficialPricingResponse
         return body.ok ? { fetchedAt: body.fetchedAt, prices: body.prices } : null
       })
-      .then(value => setOfficial(value))
-      .catch(() => setOfficial(null))
-    return () => { controller.abort() }
+      .then((value) => {
+        if (active) setOfficial(value)
+      })
+      .catch(() => {
+        if (active) setOfficial(null)
+      })
+    return () => {
+      active = false
+      controller.abort()
+    }
   }, [available, open])
 
   // Outside click / Escape close, one document listener while open (the
@@ -112,20 +165,19 @@ export function CostMeter({ useProjection, t, locked = false }: CostMeterViewPro
   const amount = formatCost(cost.currency, cost.totalCost)
   const reading = `${t('dock.label')} ${amount}`
   const symbol = currencySymbol(cost.currency)
-  // The official snapshot carries fresher cutover facts; the local schedule
-  // is the fallback for every field.
-  const effectiveSchedule = official?.prices ?? cost.schedule
-  const tier = resolveTier(effectiveSchedule, Date.now())
-  const cutover = parseEffectiveFrom(effectiveSchedule.effectiveFrom)
+  // The host projection owns the billing schedule. Official prices are
+  // display-safe only when their currency and schedule facts agree with it.
+  const tier = resolveTier(cost.schedule, Date.now())
+  const officialTier = compatibleOfficialTier(cost, official, tier)
+  const cutover = parseEffectiveFrom(cost.schedule.effectiveFrom)
   const crossYear = cutover.year !== new Date().getFullYear()
   const effectiveKey = crossYear ? 'panel.effective.crossYear' : 'panel.effective'
   const effectiveArgs = crossYear
     ? { year: String(cutover.year), month: String(cutover.month), day: String(cutover.day) }
     : { month: String(cutover.month), day: String(cutover.day) }
-  const effectiveTagKey = effectiveSchedule.effectiveFromMs > Date.now()
+  const effectiveTagKey = cost.schedule.effectiveFromMs > Date.now()
     ? 'panel.effective.tag.upcoming'
     : 'panel.effective.tag.active'
-  const officialTier = official?.prices?.[tier]
   const priceOf = (model: string, bucket: PriceBucket): number =>
     officialTier?.[model]?.[bucket] ?? cost.schedule.models[model]?.[tier][bucket] ?? 0
   return (
@@ -178,7 +230,7 @@ export function CostMeter({ useProjection, t, locked = false }: CostMeterViewPro
           <div className={css.pricing}>
             <div className={css.pricingHeader}>
               <span className={css.pricingTitle}>{t('panel.pricing.title')}</span>
-              {official !== null && (
+              {official !== null && officialTier !== undefined && (
                 <span className={css.officialTag}>{t('panel.pricing.official', { time: formatClockMs(official.fetchedAt) })}</span>
               )}
             </div>

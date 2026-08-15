@@ -16,7 +16,7 @@ export type CostSeat = 'dock' | 'meter'
  * @returns the seat name.
  */
 export function resolveSeat(config: Config): CostSeat {
-  const seat = config.seat ?? 'dock'
+  const seat = config.seat ?? 'meter'
   if (seat !== 'dock' && seat !== 'meter') {
     throw new Error(`dsh-cost-meter: unknown seat ${JSON.stringify(seat)} — expected "dock" or "meter"`)
   }
